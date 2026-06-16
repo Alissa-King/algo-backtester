@@ -24,6 +24,9 @@
     ::-webkit-scrollbar-thumb { background:#2a2a3a; border-radius:8px; }
     .spinner { border:3px solid rgba(255,255,255,0.1); border-top-color:#7c3aed; border-radius:50%; width:42px; height:42px; animation:spin 0.8s linear infinite; }
     @keyframes spin { to { transform:rotate(360deg); } }
+    .mode-tab { color:#9ca3af; }
+    .mode-tab:hover { color:#e5e7eb; }
+    .mode-tab.active { background:linear-gradient(135deg,#7c3aed,#4f46e5); color:#fff; }
     .fade-in { animation: fade 0.5s ease; }
     @keyframes fade { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
   </style>
@@ -49,9 +52,27 @@
 
       <!-- Control panel -->
       <aside class="glass rounded-2xl p-5 space-y-4 h-fit">
-        <div>
+        <!-- Mode tabs -->
+        <div class="grid grid-cols-3 gap-1 bg-black/30 rounded-xl p-1 text-xs font-semibold">
+          <button data-mode="backtest" class="mode-tab rounded-lg py-2 transition">Backtest</button>
+          <button data-mode="walkforward" class="mode-tab rounded-lg py-2 transition">Walk-Fwd</button>
+          <button data-mode="portfolio" class="mode-tab rounded-lg py-2 transition">Portfolio</button>
+        </div>
+
+        <!-- Single ticker (backtest + walk-forward) -->
+        <div id="single-block">
           <label class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Ticker</label>
           <input id="symbol" type="text" value="AAPL" class="mt-1" placeholder="AAPL, BTC-USD, MSFT" />
+        </div>
+
+        <!-- Multiple holdings (portfolio) -->
+        <div id="holdings-block" class="hidden">
+          <div class="flex justify-between items-center">
+            <label class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Holdings (symbol · weight)</label>
+            <button id="add-holding" class="text-violet-300 text-lg leading-none px-2 hover:text-violet-200">+</button>
+          </div>
+          <div id="holdings-list" class="space-y-2 mt-1"></div>
+          <p class="text-[11px] text-gray-500 mt-1">Weights are normalized automatically.</p>
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
@@ -70,6 +91,17 @@
         </div>
 
         <div id="params" class="space-y-4 pt-1"></div>
+
+        <!-- Walk-forward settings -->
+        <div id="wf-block" class="hidden">
+          <div class="flex justify-between items-baseline">
+            <label class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Out-of-sample folds</label>
+            <span class="mono text-sm text-violet-300" id="wf-splits-val">4</span>
+          </div>
+          <input id="wf-splits" type="range" min="2" max="8" step="1" value="4" class="w-full mt-1"
+            oninput="document.getElementById('wf-splits-val').textContent=this.value" />
+          <p class="text-[11px] text-gray-500 mt-1">Re-optimizes the first parameter on each in-sample window, then trades the next fold unseen.</p>
+        </div>
 
         <div class="grid grid-cols-2 gap-3 pt-2">
           <div>
@@ -111,7 +143,35 @@
             <div class="glass rounded-2xl p-4"><div id="price-chart" style="height:280px"></div></div>
           </div>
           <div id="opt-wrap" class="glass rounded-2xl p-4 hidden"><div id="opt-chart" style="height:300px"></div></div>
-          <div class="glass rounded-2xl p-4">
+
+          <!-- Walk-forward fold table -->
+          <div id="folds-wrap" class="glass rounded-2xl p-4 hidden">
+            <h3 class="font-semibold mb-1 text-sm uppercase tracking-wide text-gray-400">Walk-Forward Folds</h3>
+            <p class="text-[11px] text-gray-500 mb-3">In-sample Sharpe is what the optimizer saw; out-of-sample is the honest result on unseen data.</p>
+            <div class="overflow-auto">
+              <table class="w-full text-sm mono">
+                <thead class="text-gray-500 text-xs">
+                  <tr><th class="text-left py-2 px-2">Fold</th><th class="text-left px-2">Test window</th><th class="text-right px-2">Best param</th><th class="text-right px-2">IS Sharpe</th><th class="text-right px-2">OOS Return</th><th class="text-right px-2">OOS Sharpe</th></tr>
+                </thead>
+                <tbody id="folds"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Portfolio holdings table -->
+          <div id="holdings-wrap" class="glass rounded-2xl p-4 hidden">
+            <h3 class="font-semibold mb-3 text-sm uppercase tracking-wide text-gray-400">Per-Asset Breakdown</h3>
+            <div class="overflow-auto">
+              <table class="w-full text-sm mono">
+                <thead class="text-gray-500 text-xs">
+                  <tr><th class="text-left py-2 px-2">Symbol</th><th class="text-right px-2">Weight</th><th class="text-right px-2">Return</th><th class="text-right px-2">Sharpe</th><th class="text-right px-2">Max DD</th></tr>
+                </thead>
+                <tbody id="holdings-rows"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="tradelog-wrap" class="glass rounded-2xl p-4">
             <h3 class="font-semibold mb-3 text-sm uppercase tracking-wide text-gray-400">Trade Log</h3>
             <div class="overflow-auto max-h-80">
               <table class="w-full text-sm mono">
@@ -214,21 +274,23 @@
       </div>`;
     }
 
-    function renderMetrics(m) {
+    function renderMetrics(m, benchLabel) {
       const sign = v => (v >= 0 ? 'text-emerald-400' : 'text-red-400');
       const beat = m.total_return_pct >= m.benchmark_return_pct;
-      document.getElementById('metrics').innerHTML = [
+      const cards = [
         metricCard('Total Return', m.total_return_pct + '%', { color: sign(m.total_return_pct) }),
-        metricCard('vs Buy & Hold', m.benchmark_return_pct + '%', { color: beat ? 'text-emerald-400' : 'text-amber-400' }),
+        metricCard(benchLabel || 'vs Buy & Hold', m.benchmark_return_pct + '%', { color: beat ? 'text-emerald-400' : 'text-amber-400' }),
         metricCard('CAGR', m.cagr_pct + '%', { color: sign(m.cagr_pct) }),
         metricCard('Sharpe', m.sharpe, { color: m.sharpe >= 1 ? 'text-emerald-400' : 'text-gray-100' }),
         metricCard('Sortino', m.sortino),
         metricCard('Max Drawdown', m.max_drawdown_pct + '%', { color: 'text-red-400' }),
         metricCard('Volatility', m.volatility_pct + '%'),
-        metricCard('Win Rate', m.win_rate_pct + '%', { color: m.win_rate_pct >= 50 ? 'text-emerald-400' : 'text-gray-100' }),
-        metricCard('Trades', m.num_trades),
-        metricCard('Exposure', m.exposure_pct + '%'),
-      ].join('');
+      ];
+      // Backtest-only stats (absent in walk-forward / portfolio).
+      if (m.win_rate_pct !== undefined) cards.push(metricCard('Win Rate', m.win_rate_pct + '%', { color: m.win_rate_pct >= 50 ? 'text-emerald-400' : 'text-gray-100' }));
+      if (m.num_trades !== undefined) cards.push(metricCard('Trades', m.num_trades));
+      if (m.exposure_pct !== undefined) cards.push(metricCard('Exposure', m.exposure_pct + '%'));
+      document.getElementById('metrics').innerHTML = cards.join('');
     }
 
     function renderCharts(d) {
@@ -241,10 +303,11 @@
         { x: d.dates, y: d.drawdown, name: 'Drawdown', line: { color: '#ef4444', width: 1 }, fill: 'tozeroy', fillcolor: 'rgba(239,68,68,0.12)' },
       ], { ...PLOT_LAYOUT, title: { text: 'Drawdown', font: { size: 14 } }, yaxis: { ...PLOT_LAYOUT.yaxis, ticksuffix: '%' } }, CFG);
 
-      // Price with shaded in-market regions via marker coloring.
-      Plotly.newPlot('price-chart', [
-        { x: d.dates, y: d.price, name: 'Price', line: { color: '#38bdf8', width: 1.3 } },
-      ], { ...PLOT_LAYOUT, title: { text: d.symbol + ' Price', font: { size: 14 } } }, CFG);
+      if (d.price) {
+        Plotly.newPlot('price-chart', [
+          { x: d.dates, y: d.price, name: 'Price', line: { color: '#38bdf8', width: 1.3 } },
+        ], { ...PLOT_LAYOUT, title: { text: d.symbol + ' Price', font: { size: 14 } } }, CFG);
+      }
     }
 
     function renderTrades(trades) {
@@ -262,22 +325,131 @@
       }).join('') || '<tr><td colspan="6" class="text-center text-gray-500 py-4">No trades generated.</td></tr>';
     }
 
-    async function runBacktest() {
-      showLoading();
+    // ── Mode handling ─────────────────────────────────────────────────────
+    let MODE = 'backtest';
+
+    function setMode(mode) {
+      MODE = mode;
+      document.querySelectorAll('.mode-tab').forEach(b =>
+        b.classList.toggle('active', b.dataset.mode === mode));
+      document.getElementById('single-block').classList.toggle('hidden', mode === 'portfolio');
+      document.getElementById('holdings-block').classList.toggle('hidden', mode !== 'portfolio');
+      document.getElementById('wf-block').classList.toggle('hidden', mode !== 'walkforward');
+      document.getElementById('optimize').classList.toggle('hidden', mode !== 'backtest');
+      const runBtn = document.getElementById('run');
+      runBtn.textContent = { backtest: 'Run Backtest', walkforward: 'Run Walk-Forward', portfolio: 'Run Portfolio' }[mode];
+    }
+
+    function showResultSections({ price, trades, folds, holdings, opt }) {
+      document.getElementById('price-chart').parentElement.classList.toggle('hidden', !price);
+      document.getElementById('tradelog-wrap').classList.toggle('hidden', !trades);
+      document.getElementById('folds-wrap').classList.toggle('hidden', !folds);
+      document.getElementById('holdings-wrap').classList.toggle('hidden', !holdings);
+      document.getElementById('opt-wrap').classList.toggle('hidden', !opt);
+    }
+
+    // ── Portfolio holdings rows ───────────────────────────────────────────
+    function addHolding(symbol = '', weight = 1) {
+      const row = document.createElement('div');
+      row.className = 'flex gap-2 items-center holding-row';
+      row.innerHTML = `
+        <input type="text" class="h-sym" value="${symbol}" placeholder="AAPL" style="flex:2" />
+        <input type="number" class="h-wt" value="${weight}" step="0.1" min="0" style="flex:1" />
+        <button class="h-del text-gray-500 hover:text-red-400 px-1 text-lg leading-none">×</button>`;
+      row.querySelector('.h-del').onclick = () => row.remove();
+      document.getElementById('holdings-list').appendChild(row);
+    }
+    function gatherHoldings() {
+      return [...document.querySelectorAll('.holding-row')].map(r => ({
+        symbol: r.querySelector('.h-sym').value.trim(),
+        weight: parseFloat(r.querySelector('.h-wt').value) || 0,
+      })).filter(h => h.symbol);
+    }
+
+    async function post(url, body, loadingMsg) {
+      showLoading(loadingMsg);
       try {
-        const r = await fetch('/api/backtest', {
+        const r = await fetch(url, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload()),
+          body: JSON.stringify(body),
         });
-        if (!r.ok) { showError((await r.json()).detail || 'Request failed'); return; }
-        const d = await r.json();
+        if (!r.ok) { showError((await r.json()).detail || 'Request failed'); return null; }
         hideLoading();
         document.getElementById('results').classList.remove('hidden');
-        document.getElementById('opt-wrap').classList.add('hidden');
-        renderMetrics(d.metrics);
-        renderCharts(d);
-        renderTrades(d.trades);
-      } catch (e) { showError('Network error: ' + e.message); }
+        return await r.json();
+      } catch (e) { showError('Network error: ' + e.message); return null; }
+    }
+
+    function renderFolds(folds) {
+      document.getElementById('folds').innerHTML = folds.map(f => {
+        const c = f.oos_return_pct >= 0 ? 'text-emerald-400' : 'text-red-400';
+        return `<tr class="border-t border-white/5">
+          <td class="py-1.5 px-2">${f.fold}</td>
+          <td class="px-2 text-gray-400">${f.test_start} → ${f.test_end}</td>
+          <td class="text-right px-2">${f.best_param}</td>
+          <td class="text-right px-2 text-violet-300">${f.is_sharpe}</td>
+          <td class="text-right px-2 ${c}">${f.oos_return_pct >= 0 ? '+' : ''}${f.oos_return_pct}%</td>
+          <td class="text-right px-2">${f.oos_sharpe}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    function renderHoldings(holdings) {
+      document.getElementById('holdings-rows').innerHTML = holdings.map(h => {
+        const c = h.return_pct >= 0 ? 'text-emerald-400' : 'text-red-400';
+        return `<tr class="border-t border-white/5">
+          <td class="py-1.5 px-2 font-semibold">${h.symbol}</td>
+          <td class="text-right px-2 text-gray-400">${h.weight_pct}%</td>
+          <td class="text-right px-2 ${c}">${h.return_pct >= 0 ? '+' : ''}${h.return_pct}%</td>
+          <td class="text-right px-2">${h.sharpe}</td>
+          <td class="text-right px-2 text-red-400">${h.max_drawdown_pct}%</td>
+        </tr>`;
+      }).join('');
+    }
+
+    async function run() {
+      if (MODE === 'backtest') return runBacktest();
+      if (MODE === 'walkforward') return runWalkForward();
+      if (MODE === 'portfolio') return runPortfolio();
+    }
+
+    async function runBacktest() {
+      const d = await post('/api/backtest', payload());
+      if (!d) return;
+      showResultSections({ price: true, trades: true });
+      renderMetrics(d.metrics);
+      renderCharts(d);
+      renderTrades(d.trades);
+    }
+
+    async function runWalkForward() {
+      const splits = parseInt(document.getElementById('wf-splits').value);
+      const d = await post('/api/walkforward', { ...payload(), n_splits: splits },
+        'Optimizing on each in-sample window…');
+      if (!d) return;
+      showResultSections({ folds: true });
+      renderMetrics(d.metrics, 'OOS Buy & Hold');
+      renderCharts(d);
+      renderFolds(d.folds);
+    }
+
+    async function runPortfolio() {
+      const holdings = gatherHoldings();
+      if (!holdings.length) { showError('Add at least one holding.'); return; }
+      const body = {
+        holdings, start: document.getElementById('start').value,
+        end: document.getElementById('end').value,
+        strategy: document.getElementById('strategy').value,
+        params: gatherParams(),
+        initial_capital: parseFloat(document.getElementById('capital').value),
+        fee_bps: parseFloat(document.getElementById('fee').value),
+      };
+      const d = await post('/api/portfolio', body, 'Backtesting each holding…');
+      if (!d) return;
+      showResultSections({ holdings: true });
+      renderMetrics(d.metrics, 'vs Weighted Hold');
+      renderCharts(d);
+      renderHoldings(d.holdings);
     }
 
     async function runOptimize() {
@@ -296,8 +468,7 @@
         const d = await r.json();
         hideLoading();
         document.getElementById('results').classList.remove('hidden');
-        const wrap = document.getElementById('opt-wrap');
-        wrap.classList.remove('hidden');
+        showResultSections({ opt: true });
         Plotly.newPlot('opt-chart', [
           { x: d.results.map(x => x.value), y: d.results.map(x => x.sharpe), name: 'Sharpe', yaxis: 'y', line: { color: '#7c3aed', width: 2 }, mode: 'lines+markers' },
           { x: d.results.map(x => x.value), y: d.results.map(x => x.total_return_pct), name: 'Total Return %', yaxis: 'y2', line: { color: '#38bdf8', width: 1.5, dash: 'dot' } },
@@ -310,8 +481,16 @@
       } catch (e) { showError('Network error: ' + e.message); }
     }
 
-    document.getElementById('run').onclick = runBacktest;
+    document.getElementById('run').onclick = run;
     document.getElementById('optimize').onclick = runOptimize;
+    document.getElementById('add-holding').onclick = () => addHolding();
+    document.querySelectorAll('.mode-tab').forEach(b => b.onclick = () => setMode(b.dataset.mode));
+
+    // Seed a couple of portfolio holdings and default mode.
+    addHolding('AAPL', 0.4);
+    addHolding('MSFT', 0.3);
+    addHolding('BTC-USD', 0.3);
+    setMode('backtest');
     loadStrategies();
   </script>
 </body>

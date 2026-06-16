@@ -8,6 +8,10 @@ black-box backtesting library, so the logic is transparent and auditable.
 ![python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![plotly](https://img.shields.io/badge/Plotly.js-3F4F75?logo=plotly&logoColor=white)
 
+> **Live demo:** _add your Render URL here once deployed_ → `https://algo-backtester.onrender.com`
+>
+> One-click deploy: [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
+
 ## Features
 
 - **Three strategies** — Moving Average Crossover, RSI Mean Reversion, Bollinger Band Breakout
@@ -19,7 +23,15 @@ black-box backtesting library, so the logic is transparent and auditable.
   Win Rate, Exposure, and a full round-trip trade log
 - **Benchmark comparison** — every run is measured against buy-and-hold
 - **Parameter optimization** — sweep a parameter and find the Sharpe-maximizing value
+- **Walk-forward analysis** — anchored out-of-sample validation: the strategy is
+  re-optimized on each in-sample window and traded on the next unseen fold, so you
+  can see how much of the backtest edge survives on data the optimizer never saw
+  (a direct check against overfitting)
+- **Multi-asset portfolio mode** — run a strategy across several weighted symbols
+  (equities + crypto), blend into a rebalanced portfolio, and compare against a
+  weighted buy-and-hold benchmark with a per-asset breakdown
 - **Polished UI** — responsive single-page dashboard with interactive Plotly charts
+  and three analysis modes
 
 ## Architecture
 
@@ -52,9 +64,23 @@ Then open **http://localhost:8000**.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/strategies` | GET | List strategies and their tunable parameters |
-| `/api/backtest`   | POST | Run a single backtest, returns metrics + curves + trades |
-| `/api/optimize`   | POST | Sweep one parameter, returns metric per value + best |
+| `/api/strategies`  | GET  | List strategies and their tunable parameters |
+| `/api/backtest`    | POST | Run a single backtest, returns metrics + curves + trades |
+| `/api/optimize`    | POST | Sweep one parameter, returns metric per value + best |
+| `/api/walkforward` | POST | Anchored walk-forward; returns stitched OOS curve + per-fold results |
+| `/api/portfolio`   | POST | Multi-asset portfolio backtest with per-asset breakdown |
+
+## Deployment (Render)
+
+This repo ships a `render.yaml` blueprint. To deploy:
+
+1. Push the repo to GitHub (done — see below).
+2. Go to **[dashboard.render.com](https://dashboard.render.com)** → **New** → **Blueprint**.
+3. Connect this GitHub repo. Render reads `render.yaml` and provisions a free web service.
+4. Click **Apply**. First build takes a few minutes; subsequent pushes auto-deploy.
+
+The service binds to Render's `$PORT` and serves both the API and the frontend from
+a single FastAPI process — no separate frontend host needed.
 
 ## Notes
 

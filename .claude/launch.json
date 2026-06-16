@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backtester",
+      "runtimeExecutable": "C:\\Users\\aliss\\Documents\\algo-backtester\\backend\\.venv\\Scripts\\python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "main:app", "--app-dir", "C:\\Users\\aliss\\Documents\\algo-backtester\\backend", "--port", "8765"],
+      "port": 8765
+    }
+  ]
+}

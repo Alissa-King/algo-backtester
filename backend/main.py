@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from engine import backtest, data, strategies
+from engine import analysis, backtest, data, strategies
 
 app = FastAPI(title="Algo Backtester", version="1.0.0")
 app.add_middleware(
@@ -115,6 +115,61 @@ def optimize(req: OptimizeRequest):
         })
     best = max(results, key=lambda x: x["sharpe"]) if results else None
     return {"sweep_param": req.sweep_param, "results": results, "best": best}
+
+
+class WalkForwardRequest(BacktestRequest):
+    sweep_param: Optional[str] = None
+    n_splits: int = 4
+    train_ratio: float = 0.5
+
+
+class Holding(BaseModel):
+    symbol: str
+    weight: float = 1.0
+
+
+class PortfolioRequest(BaseModel):
+    holdings: List[Holding]
+    start: str
+    end: str
+    strategy: str
+    params: Dict[str, float] = Field(default_factory=dict)
+    initial_capital: float = 10_000.0
+    fee_bps: float = 10.0
+
+
+@app.post("/api/walkforward")
+def walkforward(req: WalkForwardRequest):
+    if req.strategy not in strategies.STRATEGIES:
+        raise HTTPException(400, f"Unknown strategy '{req.strategy}'.")
+    spec = strategies.STRATEGIES[req.strategy]
+    sweep_param = req.sweep_param or spec.params[0].name
+    try:
+        params = _resolve_params(req.strategy, req.params)
+        return analysis.walk_forward(
+            req.symbol, req.start, req.end, req.strategy, params, sweep_param,
+            n_splits=req.n_splits, train_ratio=req.train_ratio,
+            initial_capital=req.initial_capital, fee_bps=req.fee_bps,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/portfolio")
+def portfolio(req: PortfolioRequest):
+    if req.strategy not in strategies.STRATEGIES:
+        raise HTTPException(400, f"Unknown strategy '{req.strategy}'.")
+    if not req.holdings:
+        raise HTTPException(400, "Provide at least one holding.")
+    try:
+        params = _resolve_params(req.strategy, req.params)
+        return analysis.portfolio_backtest(
+            [h.model_dump() for h in req.holdings], req.start, req.end,
+            req.strategy, params,
+            initial_capital=req.initial_capital, fee_bps=req.fee_bps,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 # ── Serve frontend ──────────────────────────────────────────────────────────

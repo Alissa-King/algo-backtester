@@ -68,6 +68,55 @@ def run_backtest(
     }
 
 
+def core_performance(strat_ret: pd.Series, asset_ret: pd.Series,
+                     initial_capital: float = 10_000.0) -> dict:
+    """Compute headline metrics + equity/benchmark/drawdown from return series.
+
+    Shared by walk-forward and portfolio analysis where there is no single
+    position series to reason about (so no exposure / trade stats).
+    """
+    strat_ret = strat_ret.fillna(0.0)
+    asset_ret = asset_ret.fillna(0.0)
+    equity = (1.0 + strat_ret).cumprod() * initial_capital
+    benchmark = (1.0 + asset_ret).cumprod() * initial_capital
+
+    n = len(strat_ret)
+    years = max(n / TRADING_DAYS, 1e-9)
+    total_return = equity.iloc[-1] / equity.iloc[0] - 1.0 if n else 0.0
+    bench_return = benchmark.iloc[-1] / benchmark.iloc[0] - 1.0 if n else 0.0
+    cagr = (equity.iloc[-1] / equity.iloc[0]) ** (1 / years) - 1.0 if n else 0.0
+    vol = strat_ret.std() * np.sqrt(TRADING_DAYS)
+    mean_ret = strat_ret.mean() * TRADING_DAYS
+    sharpe = mean_ret / vol if vol > 0 else 0.0
+    downside = strat_ret[strat_ret < 0].std() * np.sqrt(TRADING_DAYS)
+    sortino = mean_ret / downside if downside > 0 else 0.0
+    max_dd = ((equity / equity.cummax() - 1.0).min()) * 100.0 if n else 0.0
+
+    return {
+        "metrics": {
+            "total_return_pct": round(float(total_return * 100), 2),
+            "benchmark_return_pct": round(float(bench_return * 100), 2),
+            "cagr_pct": round(float(cagr * 100), 2),
+            "sharpe": round(float(sharpe), 2),
+            "sortino": round(float(sortino), 2),
+            "max_drawdown_pct": round(float(max_dd), 2),
+            "volatility_pct": round(float(vol * 100), 2),
+        },
+        "equity": [round(float(v), 2) for v in equity.values],
+        "benchmark": [round(float(v), 2) for v in benchmark.values],
+        "drawdown": _drawdown_series(equity),
+    }
+
+
+def strategy_returns(df: pd.DataFrame, signals: pd.Series, fee_bps: float = 10.0) -> pd.Series:
+    """Return the cost-adjusted strategy return series (no look-ahead)."""
+    asset_ret = df["close"].pct_change().fillna(0.0)
+    position = signals.shift(1).fillna(0.0).clip(0.0, 1.0)
+    turnover = position.diff().abs().fillna(position.abs())
+    cost = turnover * (fee_bps / 10_000.0)
+    return position * asset_ret - cost
+
+
 def _drawdown_series(equity: pd.Series) -> List[float]:
     running_max = equity.cummax()
     dd = (equity / running_max - 1.0) * 100.0
