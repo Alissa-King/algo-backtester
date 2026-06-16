@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Algo Backtester</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+  <style>
+    :root { color-scheme: dark; }
+    body { font-family: 'Inter', sans-serif; background: #07070f; }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+    .glass { background: rgba(20,20,34,0.7); border: 1px solid rgba(255,255,255,0.07); backdrop-filter: blur(12px); }
+    .glow { box-shadow: 0 0 40px rgba(124,58,237,0.15); }
+    input[type=range] { accent-color: #7c3aed; }
+    select, input[type=text], input[type=date], input[type=number] {
+      background:#13131f; border:1px solid rgba(255,255,255,0.1); border-radius:10px;
+      padding:8px 12px; color:#e5e7eb; width:100%; outline:none;
+    }
+    select:focus, input:focus { border-color:#7c3aed; }
+    ::-webkit-scrollbar { width:8px; height:8px; }
+    ::-webkit-scrollbar-thumb { background:#2a2a3a; border-radius:8px; }
+    .spinner { border:3px solid rgba(255,255,255,0.1); border-top-color:#7c3aed; border-radius:50%; width:42px; height:42px; animation:spin 0.8s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .fade-in { animation: fade 0.5s ease; }
+    @keyframes fade { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  </style>
+</head>
+<body class="text-gray-200 min-h-screen">
+  <div class="max-w-[1400px] mx-auto px-5 py-6">
+
+    <!-- Header -->
+    <header class="glass glow rounded-2xl px-7 py-5 mb-6 relative overflow-hidden">
+      <div class="absolute -top-20 -right-10 w-72 h-72 rounded-full" style="background:radial-gradient(circle,rgba(124,58,237,0.25),transparent 70%)"></div>
+      <div class="flex items-center justify-between relative">
+        <div>
+          <h1 class="text-2xl font-extrabold tracking-tight">📈 Algo Backtester</h1>
+          <p class="text-sm text-gray-400 mt-1">Test trading strategies against real market history — built on a custom vectorized engine.</p>
+        </div>
+        <div class="text-right text-xs text-gray-500 mono hidden sm:block">
+          FastAPI · pandas · Plotly<br/>no look-ahead · cost-aware
+        </div>
+      </div>
+    </header>
+
+    <div class="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-6">
+
+      <!-- Control panel -->
+      <aside class="glass rounded-2xl p-5 space-y-4 h-fit">
+        <div>
+          <label class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Ticker</label>
+          <input id="symbol" type="text" value="AAPL" class="mt-1" placeholder="AAPL, BTC-USD, MSFT" />
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Start</label>
+            <input id="start" type="date" value="2019-01-01" class="mt-1" />
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-gray-400 uppercase tracking-wide">End</label>
+            <input id="end" type="date" value="2024-01-01" class="mt-1" />
+          </div>
+        </div>
+        <div>
+          <label class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Strategy</label>
+          <select id="strategy" class="mt-1"></select>
+          <p id="strat-desc" class="text-xs text-gray-500 mt-2 leading-relaxed"></p>
+        </div>
+
+        <div id="params" class="space-y-4 pt-1"></div>
+
+        <div class="grid grid-cols-2 gap-3 pt-2">
+          <div>
+            <label class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Capital ($)</label>
+            <input id="capital" type="number" value="10000" class="mt-1" />
+          </div>
+          <div>
+            <label class="text-xs font-semibold text-gray-400 uppercase tracking-wide">Fee (bps)</label>
+            <input id="fee" type="number" value="10" class="mt-1" />
+          </div>
+        </div>
+
+        <button id="run" class="w-full mt-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 transition rounded-xl py-3 font-semibold tracking-wide">
+          Run Backtest
+        </button>
+        <button id="optimize" class="w-full bg-white/5 hover:bg-white/10 border border-white/10 transition rounded-xl py-2.5 text-sm font-medium">
+          🔬 Optimize first parameter
+        </button>
+        <p id="error" class="text-sm text-red-400 hidden"></p>
+      </aside>
+
+      <!-- Results -->
+      <main class="space-y-6">
+        <div id="placeholder" class="glass rounded-2xl p-16 text-center text-gray-500">
+          <div class="text-5xl mb-4">🔭</div>
+          <p>Configure a strategy and run a backtest to see results.</p>
+        </div>
+
+        <div id="loading" class="glass rounded-2xl p-16 flex flex-col items-center gap-4 hidden">
+          <div class="spinner"></div>
+          <p class="text-gray-400 text-sm" id="loading-msg">Fetching data & crunching numbers…</p>
+        </div>
+
+        <div id="results" class="hidden space-y-6">
+          <div id="metrics" class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3"></div>
+          <div class="glass rounded-2xl p-4"><div id="equity-chart" style="height:360px"></div></div>
+          <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <div class="glass rounded-2xl p-4"><div id="dd-chart" style="height:280px"></div></div>
+            <div class="glass rounded-2xl p-4"><div id="price-chart" style="height:280px"></div></div>
+          </div>
+          <div id="opt-wrap" class="glass rounded-2xl p-4 hidden"><div id="opt-chart" style="height:300px"></div></div>
+          <div class="glass rounded-2xl p-4">
+            <h3 class="font-semibold mb-3 text-sm uppercase tracking-wide text-gray-400">Trade Log</h3>
+            <div class="overflow-auto max-h-80">
+              <table class="w-full text-sm mono">
+                <thead class="text-gray-500 text-xs sticky top-0 bg-[#13131f]">
+                  <tr><th class="text-left py-2 px-2">Entry</th><th class="text-left px-2">Exit</th><th class="text-right px-2">In</th><th class="text-right px-2">Out</th><th class="text-right px-2">Days</th><th class="text-right px-2">Return</th></tr>
+                </thead>
+                <tbody id="trades"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <footer class="text-center text-xs text-gray-600 mt-10 mono">Past performance does not guarantee future results. For educational use.</footer>
+  </div>
+
+  <script>
+    const PLOT_LAYOUT = {
+      paper_bgcolor: 'rgba(0,0,0,0)', plot_bgcolor: 'rgba(0,0,0,0)',
+      font: { color: '#9ca3af', family: 'Inter' },
+      margin: { l: 55, r: 20, t: 40, b: 40 },
+      xaxis: { gridcolor: 'rgba(255,255,255,0.05)' },
+      yaxis: { gridcolor: 'rgba(255,255,255,0.05)' },
+      legend: { orientation: 'h', y: 1.12 },
+    };
+    const CFG = { responsive: true, displayModeBar: false };
+    let STRATEGIES = [];
+
+    async function loadStrategies() {
+      const r = await fetch('/api/strategies');
+      STRATEGIES = (await r.json()).strategies;
+      const sel = document.getElementById('strategy');
+      sel.innerHTML = STRATEGIES.map(s => `<option value="${s.key}">${s.name}</option>`).join('');
+      sel.onchange = renderParams;
+      renderParams();
+    }
+
+    function currentStrategy() {
+      return STRATEGIES.find(s => s.key === document.getElementById('strategy').value);
+    }
+
+    function renderParams() {
+      const s = currentStrategy();
+      document.getElementById('strat-desc').textContent = s.description;
+      const wrap = document.getElementById('params');
+      wrap.innerHTML = s.params.map(p => `
+        <div>
+          <div class="flex justify-between items-baseline">
+            <label class="text-xs font-semibold text-gray-400 uppercase tracking-wide">${p.label}</label>
+            <span class="mono text-sm text-violet-300" id="val-${p.name}">${p.default}</span>
+          </div>
+          <input type="range" min="${p.min}" max="${p.max}" step="${p.step}" value="${p.default}"
+            id="param-${p.name}" class="w-full mt-1"
+            oninput="document.getElementById('val-${p.name}').textContent=this.value" />
+        </div>`).join('');
+    }
+
+    function gatherParams() {
+      const s = currentStrategy();
+      const params = {};
+      s.params.forEach(p => params[p.name] = parseFloat(document.getElementById('param-' + p.name).value));
+      return params;
+    }
+
+    function payload() {
+      return {
+        symbol: document.getElementById('symbol').value,
+        start: document.getElementById('start').value,
+        end: document.getElementById('end').value,
+        strategy: document.getElementById('strategy').value,
+        params: gatherParams(),
+        initial_capital: parseFloat(document.getElementById('capital').value),
+        fee_bps: parseFloat(document.getElementById('fee').value),
+      };
+    }
+
+    function showLoading(msg) {
+      document.getElementById('placeholder').classList.add('hidden');
+      document.getElementById('results').classList.add('hidden');
+      document.getElementById('error').classList.add('hidden');
+      const l = document.getElementById('loading');
+      l.classList.remove('hidden');
+      document.getElementById('loading-msg').textContent = msg || 'Fetching data & crunching numbers…';
+    }
+    function hideLoading() { document.getElementById('loading').classList.add('hidden'); }
+    function showError(msg) {
+      hideLoading();
+      const e = document.getElementById('error');
+      e.textContent = msg; e.classList.remove('hidden');
+      if (document.getElementById('results').classList.contains('hidden'))
+        document.getElementById('placeholder').classList.remove('hidden');
+    }
+
+    const fmtMoney = v => '$' + Number(v).toLocaleString('en-US', { maximumFractionDigits: 0 });
+    function metricCard(label, value, opts = {}) {
+      const color = opts.color || 'text-gray-100';
+      return `<div class="glass rounded-xl p-3.5 fade-in">
+        <div class="text-[10px] uppercase tracking-wider text-gray-500">${label}</div>
+        <div class="text-xl font-bold mono mt-1 ${color}">${value}</div>
+      </div>`;
+    }
+
+    function renderMetrics(m) {
+      const sign = v => (v >= 0 ? 'text-emerald-400' : 'text-red-400');
+      const beat = m.total_return_pct >= m.benchmark_return_pct;
+      document.getElementById('metrics').innerHTML = [
+        metricCard('Total Return', m.total_return_pct + '%', { color: sign(m.total_return_pct) }),
+        metricCard('vs Buy & Hold', m.benchmark_return_pct + '%', { color: beat ? 'text-emerald-400' : 'text-amber-400' }),
+        metricCard('CAGR', m.cagr_pct + '%', { color: sign(m.cagr_pct) }),
+        metricCard('Sharpe', m.sharpe, { color: m.sharpe >= 1 ? 'text-emerald-400' : 'text-gray-100' }),
+        metricCard('Sortino', m.sortino),
+        metricCard('Max Drawdown', m.max_drawdown_pct + '%', { color: 'text-red-400' }),
+        metricCard('Volatility', m.volatility_pct + '%'),
+        metricCard('Win Rate', m.win_rate_pct + '%', { color: m.win_rate_pct >= 50 ? 'text-emerald-400' : 'text-gray-100' }),
+        metricCard('Trades', m.num_trades),
+        metricCard('Exposure', m.exposure_pct + '%'),
+      ].join('');
+    }
+
+    function renderCharts(d) {
+      Plotly.newPlot('equity-chart', [
+        { x: d.dates, y: d.equity, name: 'Strategy', line: { color: '#7c3aed', width: 2 }, fill: 'tozeroy', fillcolor: 'rgba(124,58,237,0.08)' },
+        { x: d.dates, y: d.benchmark, name: 'Buy & Hold', line: { color: '#64748b', width: 1.5, dash: 'dot' } },
+      ], { ...PLOT_LAYOUT, title: { text: 'Equity Curve', font: { size: 14 } }, yaxis: { ...PLOT_LAYOUT.yaxis, tickprefix: '$' } }, CFG);
+
+      Plotly.newPlot('dd-chart', [
+        { x: d.dates, y: d.drawdown, name: 'Drawdown', line: { color: '#ef4444', width: 1 }, fill: 'tozeroy', fillcolor: 'rgba(239,68,68,0.12)' },
+      ], { ...PLOT_LAYOUT, title: { text: 'Drawdown', font: { size: 14 } }, yaxis: { ...PLOT_LAYOUT.yaxis, ticksuffix: '%' } }, CFG);
+
+      // Price with shaded in-market regions via marker coloring.
+      Plotly.newPlot('price-chart', [
+        { x: d.dates, y: d.price, name: 'Price', line: { color: '#38bdf8', width: 1.3 } },
+      ], { ...PLOT_LAYOUT, title: { text: d.symbol + ' Price', font: { size: 14 } } }, CFG);
+    }
+
+    function renderTrades(trades) {
+      document.getElementById('trades').innerHTML = trades.map(t => {
+        const c = t.return_pct >= 0 ? 'text-emerald-400' : 'text-red-400';
+        const open = t.open ? ' <span class="text-[10px] text-amber-400">OPEN</span>' : '';
+        return `<tr class="border-t border-white/5">
+          <td class="py-1.5 px-2">${t.entry_date}</td>
+          <td class="px-2">${t.exit_date}${open}</td>
+          <td class="text-right px-2">${t.entry_price}</td>
+          <td class="text-right px-2">${t.exit_price}</td>
+          <td class="text-right px-2 text-gray-500">${t.bars}</td>
+          <td class="text-right px-2 ${c}">${t.return_pct >= 0 ? '+' : ''}${t.return_pct}%</td>
+        </tr>`;
+      }).join('') || '<tr><td colspan="6" class="text-center text-gray-500 py-4">No trades generated.</td></tr>';
+    }
+
+    async function runBacktest() {
+      showLoading();
+      try {
+        const r = await fetch('/api/backtest', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload()),
+        });
+        if (!r.ok) { showError((await r.json()).detail || 'Request failed'); return; }
+        const d = await r.json();
+        hideLoading();
+        document.getElementById('results').classList.remove('hidden');
+        document.getElementById('opt-wrap').classList.add('hidden');
+        renderMetrics(d.metrics);
+        renderCharts(d);
+        renderTrades(d.trades);
+      } catch (e) { showError('Network error: ' + e.message); }
+    }
+
+    async function runOptimize() {
+      const s = currentStrategy();
+      const p = s.params[0];
+      const values = [];
+      for (let v = p.min; v <= p.max; v += p.step * Math.max(1, Math.round((p.max - p.min) / 25 / p.step)))
+        values.push(Math.round(v * 100) / 100);
+      showLoading('Sweeping ' + p.label + ' across ' + values.length + ' values…');
+      try {
+        const r = await fetch('/api/optimize', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...payload(), sweep_param: p.name, sweep_values: values }),
+        });
+        if (!r.ok) { showError((await r.json()).detail || 'Request failed'); return; }
+        const d = await r.json();
+        hideLoading();
+        document.getElementById('results').classList.remove('hidden');
+        const wrap = document.getElementById('opt-wrap');
+        wrap.classList.remove('hidden');
+        Plotly.newPlot('opt-chart', [
+          { x: d.results.map(x => x.value), y: d.results.map(x => x.sharpe), name: 'Sharpe', yaxis: 'y', line: { color: '#7c3aed', width: 2 }, mode: 'lines+markers' },
+          { x: d.results.map(x => x.value), y: d.results.map(x => x.total_return_pct), name: 'Total Return %', yaxis: 'y2', line: { color: '#38bdf8', width: 1.5, dash: 'dot' } },
+        ], {
+          ...PLOT_LAYOUT,
+          title: { text: 'Parameter Sweep: ' + p.label + (d.best ? '  (best Sharpe @ ' + d.best.value + ')' : ''), font: { size: 14 } },
+          yaxis: { ...PLOT_LAYOUT.yaxis, title: 'Sharpe' },
+          yaxis2: { title: 'Return %', overlaying: 'y', side: 'right', gridcolor: 'transparent' },
+        }, CFG);
+      } catch (e) { showError('Network error: ' + e.message); }
+    }
+
+    document.getElementById('run').onclick = runBacktest;
+    document.getElementById('optimize').onclick = runOptimize;
+    loadStrategies();
+  </script>
+</body>
+</html>
