@@ -15,6 +15,8 @@ black-box backtesting library, so the logic is transparent and auditable.
 >
 > [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Alissa-King/algo-backtester)
 
+![Algo Backtester dashboard](docs/dashboard-backtest.png)
+
 ## Features
 
 - **Three strategies** — Moving Average Crossover, RSI Mean Reversion, Bollinger Band Breakout
@@ -72,6 +74,18 @@ Then open **http://localhost:8000**.
 | `/api/optimize`    | POST | Sweep one parameter, returns metric per value + best |
 | `/api/walkforward` | POST | Anchored walk-forward; returns stitched OOS curve + per-fold results |
 | `/api/portfolio`   | POST | Multi-asset portfolio backtest with per-asset breakdown |
+
+## Screenshots
+
+**Walk-forward analysis** — re-optimizes on each in-sample window and trades the
+next fold unseen, exposing how much edge survives out-of-sample:
+
+![Walk-forward mode](docs/dashboard-walkforward.png)
+
+**Multi-asset portfolio** — a strategy run across weighted holdings, blended into a
+rebalanced portfolio with a per-asset breakdown:
+
+![Portfolio mode](docs/dashboard-portfolio.png)
 
 ## Deployment (Render)
 
