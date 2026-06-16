@@ -8,9 +8,12 @@ black-box backtesting library, so the logic is transparent and auditable.
 ![python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![plotly](https://img.shields.io/badge/Plotly.js-3F4F75?logo=plotly&logoColor=white)
 
-> **Live demo:** _add your Render URL here once deployed_ → `https://algo-backtester.onrender.com`
+### 🔗 [Live demo → algo-backtester.onrender.com](https://algo-backtester.onrender.com)
+
+> Hosted on Render's free tier, so the first request after it's been idle may take
+> ~30–60 seconds to spin up. Deploy your own copy with the button below.
 >
-> One-click deploy: [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
+> [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Alissa-King/algo-backtester)
 
 ## Features
 
@@ -72,12 +75,12 @@ Then open **http://localhost:8000**.
 
 ## Deployment (Render)
 
-This repo ships a `render.yaml` blueprint. To deploy:
+This repo ships a `render.yaml` blueprint, so it deploys to Render with no manual
+config. To spin up your own instance:
 
-1. Push the repo to GitHub (done — see below).
-2. Go to **[dashboard.render.com](https://dashboard.render.com)** → **New** → **Blueprint**.
-3. Connect this GitHub repo. Render reads `render.yaml` and provisions a free web service.
-4. Click **Apply**. First build takes a few minutes; subsequent pushes auto-deploy.
+1. Go to **[dashboard.render.com](https://dashboard.render.com)** → **New** → **Blueprint**.
+2. Connect your fork of this repo. Render reads `render.yaml` and provisions a free web service.
+3. Click **Apply**. The first build takes a few minutes; subsequent pushes auto-deploy.
 
 The service binds to Render's `$PORT` and serves both the API and the frontend from
 a single FastAPI process — no separate frontend host needed.
